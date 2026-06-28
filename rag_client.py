@@ -8,37 +8,53 @@ def discover_chroma_backends() -> Dict[str, Dict[str, str]]:
     backends = {}
     current_dir = Path(".")
     
-    # Look for ChromaDB directories
-    # TODO: Create list of directories that match specific criteria (directory type and name pattern)
+   # Find directories beginning with "chroma"
+    chroma_dirs = [
+        d for d in current_dir.iterdir()
+        if d.is_dir() and d.name.startswith("chroma")
+    ]
+   for directory in chroma_dirs:
+        try:
+            client = chromadb.PersistentClient(
+                path=str(directory),
+                settings=Settings(anonymized_telemetry=False)
+            )
+            collections = client.list_collections()
+            for collection in collections:
+                key = f"{directory.name}_{collection.name}"
+                try:
+                    count = collection.count()
+                except Exception:
+                    count = "Unknown"
+                backends[key] = {
+                    "directory": str(directory),
+                    "collection_name": collection.name,
+                    "display_name": f"{directory.name} → {collection.name} ({count} docs)"
+                }
+        except Exception as e:
+            key = directory.name
+            backends[key] = {
+                "directory": str(directory),
+                "collection_name": "",
+                "display_name": f"{directory.name} (Error: {str(e)[:40]})"
+            }
 
-    # TODO: Loop through each discovered directory
-        # TODO: Wrap connection attempt in try-except block for error handling
-        
-            # TODO: Initialize database client with directory path and configuration settings
-            
-            # TODO: Retrieve list of available collections from the database
-            
-            # TODO: Loop through each collection found
-                # TODO: Create unique identifier key combining directory and collection names
-                # TODO: Build information dictionary containing:
-                    # TODO: Store directory path as string
-                    # TODO: Store collection name
-                    # TODO: Create user-friendly display name
-                    # TODO: Get document count with fallback for unsupported operations
-                # TODO: Add collection information to backends dictionary
-        
-        # TODO: Handle connection or access errors gracefully
-            # TODO: Create fallback entry for inaccessible directories
-            # TODO: Include error information in display name with truncation
-            # TODO: Set appropriate fallback values for missing information
-
-    # TODO: Return complete backends dictionary with all discovered collections
+    return backends
 
 def initialize_rag_system(chroma_dir: str, collection_name: str):
     """Initialize the RAG system with specified backend (cached for performance)"""
 
     # TODO: Create a chomadb persistentclient
     # TODO: Return the collection with the collection_name
+    try:
+        client = chromadb.PersistentClient(
+            path=chroma_dir,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        collection = client.get_collection(collection_name)
+        return collection, True, None
+    except Exception as e:
+        return None, False, str(e)
 
 def retrieve_documents(collection, query: str, n_results: int = 3, 
                       mission_filter: Optional[str] = None) -> Optional[Dict]:
@@ -55,6 +71,18 @@ def retrieve_documents(collection, query: str, n_results: int = 3,
         # TODO: Apply conditional filter (None for no filtering, dictionary for specific filtering)
 
     # TODO: Return query results to caller
+    where = None
+
+    if mission_filter and mission_filter.lower() != "all":
+        where = {"mission": mission_filter}
+
+    results = collection.query(
+        query_texts=[query],
+        n_results=n_results,
+        where=where
+    )
+
+    return results
 
 def format_context(documents: List[str], metadatas: List[Dict]) -> str:
     """Format retrieved documents into context"""
@@ -77,3 +105,30 @@ def format_context(documents: List[str], metadatas: List[Dict]) -> str:
         # TODO: Add truncated or full document content to context parts list
 
     # TODO: Join all context parts with newlines and return formatted string
+    if not documents:
+        return ""
+
+    context_parts = ["Relevant NASA Documents:\n"]
+
+    for i, (doc, metadata) in enumerate(zip(documents, metadatas), start=1):
+
+        mission = metadata.get("mission", "Unknown").replace("_", " ").title()
+        source = metadata.get("source", "Unknown")
+        category = metadata.get(
+            "document_category",
+            "General"
+        ).replace("_", " ").title()
+
+        context_parts.append(
+            f"[Source {i}] "
+            f"Mission: {mission} | "
+            f"Category: {category} | "
+            f"File: {source}"
+        )
+
+        if len(doc) > 1200:
+            context_parts.append(doc[:1200] + "...\n")
+        else:
+            context_parts.append(doc + "\n")
+
+    return "\n".join(context_parts)    
