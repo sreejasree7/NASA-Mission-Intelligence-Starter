@@ -24,4 +24,58 @@ def evaluate_response_quality(question: str, answer: str, contexts: List[str]) -
     # TODO: Evaluate the response using the metrics
     # TODO: Return the evaluation results
 
-    pass
+    """Evaluate response quality using RAGAS."""
+
+    if not RAGAS_AVAILABLE:
+        return {"error": "RAGAS not available"}
+
+    try:
+
+        # Create evaluator LLM
+        evaluator_llm = LangchainLLMWrapper(
+            ChatOpenAI(
+                model="gpt-3.5-turbo",
+                temperature=0
+            )
+        )
+
+        # Create embedding model
+        evaluator_embeddings = LangchainEmbeddingsWrapper(
+            OpenAIEmbeddings(
+                model="text-embedding-3-small"
+            )
+        )
+
+        # Build evaluation sample
+        sample = SingleTurnSample(
+            user_input=question,
+            response=answer,
+            retrieved_contexts=contexts
+        )
+
+        metrics = [
+            ResponseRelevancy(),
+            Faithfulness(),
+            BleuScore(),
+            RougeScore(),
+        ]
+
+        results = evaluate(
+            dataset=[sample],
+            metrics=metrics,
+            llm=evaluator_llm,
+            embeddings=evaluator_embeddings
+        )
+
+        scores = {}
+
+        for metric in metrics:
+            name = metric.__class__.__name__
+            scores[name] = float(results[name][0])
+
+        return scores
+
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
